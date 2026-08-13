@@ -1,0 +1,13 @@
+update-ticks: 2
+show-on-join: true
+max-display-speed: 50.0
+
+ignore-vehicles: true
+ignore-spectators: false
+
+fast-threshold: 20.0
+very-fast-threshold: 40.0
+
+normal-color: GREEN
+fast-color: YELLOW
+very-fast-color: RED
