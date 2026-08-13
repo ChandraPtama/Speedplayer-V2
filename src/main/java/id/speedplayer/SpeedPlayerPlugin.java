@@ -1,5 +1,7 @@
 package id.speedplayer;
 
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
@@ -24,8 +26,16 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
     private final Map<UUID, Location> lastLocations = new HashMap<>();
     private final Map<UUID, Long> lastTimes = new HashMap<>();
     private final Map<UUID, Boolean> enabled = new HashMap<>();
+
+    /*
+     * Menyimpan kendaraan/mob yang sedang dinaiki.
+     * Digunakan untuk mendeteksi saat player naik/turun kendaraan.
+     */
     private final Map<UUID, UUID> lastVehicles = new HashMap<>();
 
+    /*
+     * Scoreboard masing-masing player.
+     */
     private final Map<UUID, Scoreboard> scoreboards = new HashMap<>();
 
     private BukkitTask updateTask;
@@ -36,8 +46,15 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
         saveDefaultConfig();
 
         boolean showOnJoin =
-                getConfig().getBoolean("show-on-join", true);
+                getConfig().getBoolean(
+                        "show-on-join",
+                        true
+                );
 
+        /*
+         * Buat scoreboard untuk player yang
+         * sudah online ketika plugin di-reload.
+         */
         for (Player player : Bukkit.getOnlinePlayers()) {
 
             enabled.put(
@@ -50,19 +67,31 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
             }
         }
 
+        /*
+         * Interval update speed.
+         *
+         * Default:
+         * 2 ticks = 0.1 detik
+         */
         long interval = Math.max(
                 1L,
-                getConfig().getLong("update-ticks", 2L)
+                getConfig().getLong(
+                        "update-ticks",
+                        2L
+                )
         );
 
-        updateTask = Bukkit.getScheduler().runTaskTimer(
-                this,
-                this::updatePlayers,
-                interval,
-                interval
-        );
+        updateTask =
+                Bukkit.getScheduler().runTaskTimer(
+                        this,
+                        this::updatePlayers,
+                        interval,
+                        interval
+                );
 
-        getLogger().info("SpeedPlayer enabled.");
+        getLogger().info(
+                "SpeedPlayer enabled."
+        );
     }
 
     @Override
@@ -72,7 +101,12 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
             updateTask.cancel();
         }
 
-        for (Player player : Bukkit.getOnlinePlayers()) {
+        /*
+         * Kembalikan scoreboard player ke scoreboard utama.
+         */
+        for (Player player :
+                Bukkit.getOnlinePlayers()) {
+
             removeScoreboard(player);
         }
 
@@ -83,14 +117,22 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
         lastVehicles.clear();
     }
 
+    /**
+     * Update speed semua player.
+     */
     private void updatePlayers() {
 
         long now = System.nanoTime();
 
-        for (Player player : Bukkit.getOnlinePlayers()) {
+        for (Player player :
+                Bukkit.getOnlinePlayers()) {
 
-            UUID id = player.getUniqueId();
+            UUID id =
+                    player.getUniqueId();
 
+            /*
+             * Apakah speed display aktif?
+             */
             if (!enabled.getOrDefault(
                     id,
                     getConfig().getBoolean(
@@ -101,37 +143,83 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                 continue;
             }
 
+            /*
+             * Pastikan scoreboard tersedia.
+             */
             if (!scoreboards.containsKey(id)) {
+
                 createScoreboard(player);
             }
 
+            /*
+             * Spectator.
+             */
             if (getConfig().getBoolean(
                     "ignore-spectators",
                     false
-            ) && player.getGameMode() == GameMode.SPECTATOR) {
+            )
+                    && player.getGameMode()
+                    == GameMode.SPECTATOR) {
 
-                updateScoreboard(player, 0.0);
+                updateScoreboard(
+                        player,
+                        0.0
+                );
+
                 continue;
             }
 
+            /*
+             * Entity yang dihitung.
+             *
+             * Jalan kaki:
+             * Player
+             *
+             * Naik Horse:
+             * Horse
+             *
+             * Naik Pig:
+             * Pig
+             *
+             * Naik Camel:
+             * Camel
+             *
+             * Naik Boat:
+             * Boat
+             *
+             * dll.
+             */
             Entity trackedEntity =
                     getTrackedEntity(player);
 
             Location current =
                     trackedEntity.getLocation();
 
+            /*
+             * ID kendaraan yang sedang dinaiki.
+             */
             UUID currentVehicleId = null;
 
             if (player.isInsideVehicle()
                     && player.getVehicle() != null) {
 
                 currentVehicleId =
-                        player.getVehicle().getUniqueId();
+                        player.getVehicle()
+                                .getUniqueId();
             }
 
             UUID previousVehicleId =
                     lastVehicles.get(id);
 
+            /*
+             * Deteksi perubahan kendaraan.
+             *
+             * Contoh:
+             *
+             * Player -> Horse
+             *
+             * Horse -> Player
+             */
             boolean vehicleChanged;
 
             if (currentVehicleId == null) {
@@ -155,10 +243,21 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
             Long previousTime =
                     lastTimes.get(id);
 
+            /*
+             * Hitung speed hanya jika:
+             *
+             * - bukan baru naik/turun kendaraan
+             * - lokasi sebelumnya tersedia
+             * - waktu sebelumnya tersedia
+             * - masih berada di world yang sama
+             */
             if (!vehicleChanged
                     && previous != null
                     && previousTime != null
-                    && sameWorld(previous, current)) {
+                    && sameWorld(
+                            previous,
+                            current
+                    )) {
 
                 double dx =
                         current.getX()
@@ -172,6 +271,9 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                         current.getZ()
                                 - previous.getZ();
 
+                /*
+                 * Jarak perpindahan dalam blocks.
+                 */
                 double distance =
                         Math.sqrt(
                                 dx * dx
@@ -179,10 +281,20 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                                         + dz * dz
                         );
 
+                /*
+                 * Waktu dalam detik.
+                 */
                 double seconds =
-                        (now - previousTime)
+                        (
+                                now
+                                        - previousTime
+                        )
                                 / 1_000_000_000.0;
 
+                /*
+                 * Hindari pembagian dengan nol
+                 * dan waktu yang terlalu lama.
+                 */
                 if (seconds > 0.0
                         && seconds < 2.0) {
 
@@ -191,16 +303,25 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                 }
             }
 
+            /*
+             * Simpan posisi terbaru.
+             */
             lastLocations.put(
                     id,
                     current.clone()
             );
 
+            /*
+             * Simpan waktu terbaru.
+             */
             lastTimes.put(
                     id,
                     now
             );
 
+            /*
+             * Simpan kendaraan terbaru.
+             */
             if (currentVehicleId != null) {
 
                 lastVehicles.put(
@@ -213,6 +334,9 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                 lastVehicles.remove(id);
             }
 
+            /*
+             * Update tampilan scoreboard.
+             */
             updateScoreboard(
                     player,
                     speed
@@ -220,17 +344,35 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
         }
     }
 
-    private Entity getTrackedEntity(Player player) {
+    /**
+     * Menentukan entity yang digunakan untuk
+     * menghitung speed.
+     */
+    private Entity getTrackedEntity(
+            Player player
+    ) {
 
+        /*
+         * Jika sedang menaiki sesuatu,
+         * hitung pergerakan kendaraan/mob.
+         */
         if (player.isInsideVehicle()
                 && player.getVehicle() != null) {
 
             return player.getVehicle();
         }
 
+        /*
+         * Jika berjalan kaki,
+         * hitung pergerakan player.
+         */
         return player;
     }
 
+    /**
+     * Mengecek apakah dua lokasi berada
+     * di world yang sama.
+     */
     private boolean sameWorld(
             Location first,
             Location second
@@ -243,11 +385,19 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                 );
     }
 
-    private void createScoreboard(Player player) {
+    /**
+     * Membuat scoreboard sidebar.
+     */
+    private void createScoreboard(
+            Player player
+    ) {
 
         UUID id =
                 player.getUniqueId();
 
+        /*
+         * Hapus scoreboard lama jika ada.
+         */
         removeScoreboard(player);
 
         ScoreboardManager manager =
@@ -257,23 +407,34 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
             return;
         }
 
+        /*
+         * Buat scoreboard baru.
+         */
         Scoreboard scoreboard =
                 manager.getNewScoreboard();
 
+        /*
+         * Objective.
+         */
         Objective objective =
                 scoreboard.registerNewObjective(
                         "speedplayer",
                         "dummy",
-                        "⚡ SPEED"
+                        Component.text(
+                                "⚡ SPEED",
+                                NamedTextColor.AQUA
+                        )
                 );
 
+        /*
+         * Tampilkan di sisi kanan layar.
+         */
         objective.setDisplaySlot(
                 DisplaySlot.SIDEBAR
         );
 
         /*
-         * Baris kosong digunakan sebagai
-         * spacer agar tampilan lebih rapi.
+         * Team untuk nilai speed.
          */
         Team speedTeam =
                 scoreboard.registerNewTeam(
@@ -288,6 +449,9 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                 "speed_value"
         ).setScore(2);
 
+        /*
+         * Team untuk status kendaraan.
+         */
         Team vehicleTeam =
                 scoreboard.registerNewTeam(
                         "vehicle"
@@ -309,16 +473,25 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                 scoreboard
         );
 
+        /*
+         * Pasang scoreboard ke player.
+         */
         player.setScoreboard(
                 scoreboard
         );
 
+        /*
+         * Tampilkan nilai awal.
+         */
         updateScoreboard(
                 player,
                 0.0
         );
     }
 
+    /**
+     * Update teks sidebar.
+     */
     private void updateScoreboard(
             Player player,
             double speed
@@ -345,9 +518,13 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
 
         if (speedTeam == null
                 || vehicleTeam == null) {
+
             return;
         }
 
+        /*
+         * Threshold warna.
+         */
         double fastThreshold =
                 getConfig().getDouble(
                         "fast-threshold",
@@ -360,35 +537,51 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                         10.0
                 );
 
-        String prefix;
+        NamedTextColor speedColor;
 
+        /*
+         * Merah = sangat cepat
+         */
         if (speed >= veryFastThreshold) {
 
-            prefix = "§c⚡ ";
+            speedColor =
+                    NamedTextColor.RED;
 
+        /*
+         * Kuning = cepat
+         */
         } else if (speed >= fastThreshold) {
 
-            prefix = "§e⚡ ";
+            speedColor =
+                    NamedTextColor.YELLOW;
 
+        /*
+         * Hijau = normal
+         */
         } else {
 
-            prefix = "§a⚡ ";
+            speedColor =
+                    NamedTextColor.GREEN;
         }
 
         /*
          * Tampilkan speed.
+         *
+         * Paper 26.2 menggunakan Component
+         * untuk prefix Team.
          */
         speedTeam.prefix(
-                prefix
-                        + String.format(
-                                "%.2f",
+                Component.text(
+                        String.format(
+                                "⚡ %.2f blocks/s",
                                 speed
-                        )
-                        + " §7blocks/s"
+                        ),
+                        speedColor
+                )
         );
 
         /*
-         * Tampilkan jenis kendaraan.
+         * Tampilkan kendaraan.
          */
         if (player.isInsideVehicle()
                 && player.getVehicle() != null) {
@@ -399,17 +592,37 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                     );
 
             vehicleTeam.prefix(
-                    "§7" + vehicleName
+                    Component.text(
+                            vehicleName,
+                            NamedTextColor.GRAY
+                    )
             );
 
         } else {
 
             vehicleTeam.prefix(
-                    "§7Walking"
+                    Component.text(
+                            "Walking",
+                            NamedTextColor.GRAY
+                    )
             );
         }
     }
 
+    /**
+     * Mengubah nama EntityType menjadi
+     * nama yang lebih rapi.
+     *
+     * Contoh:
+     *
+     * DARK_OAK_BOAT
+     * ->
+     * Dark Oak Boat
+     *
+     * CAMEL
+     * ->
+     * Camel
+     */
     private String getVehicleName(
             Entity entity
     ) {
@@ -440,6 +653,7 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
             );
 
             if (word.length() > 1) {
+
                 result.append(
                         word.substring(1)
                 );
@@ -448,9 +662,14 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
             result.append(" ");
         }
 
-        return result.toString().trim();
+        return result
+                .toString()
+                .trim();
     }
 
+    /**
+     * Menghapus scoreboard dari player.
+     */
     private void removeScoreboard(
             Player player
     ) {
@@ -475,6 +694,13 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
         }
     }
 
+    /**
+     * Command:
+     *
+     * /speed
+     * /speed on
+     * /speed off
+     */
     @Override
     public boolean onCommand(
             CommandSender sender,
@@ -483,6 +709,9 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
             String[] args
     ) {
 
+        /*
+         * Command hanya bisa digunakan player.
+         */
         if (!(sender instanceof Player player)) {
 
             sender.sendMessage(
@@ -504,18 +733,33 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                         )
                 );
 
+        /*
+         * /speed
+         *
+         * Toggle.
+         */
         if (args.length == 0) {
 
             current = !current;
 
+        /*
+         * /speed on
+         */
         } else if (
-                args[0].equalsIgnoreCase("on")
+                args[0].equalsIgnoreCase(
+                        "on"
+                )
         ) {
 
             current = true;
 
+        /*
+         * /speed off
+         */
         } else if (
-                args[0].equalsIgnoreCase("off")
+                args[0].equalsIgnoreCase(
+                        "off"
+                )
         ) {
 
             current = false;
@@ -523,12 +767,18 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
         } else {
 
             player.sendMessage(
-                    "§eGunakan: /speed [on|off]"
+                    Component.text(
+                            "Gunakan: /speed [on|off]",
+                            NamedTextColor.YELLOW
+                    )
             );
 
             return true;
         }
 
+        /*
+         * Simpan status.
+         */
         enabled.put(
                 id,
                 current
@@ -536,26 +786,44 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
 
         if (current) {
 
+            /*
+             * Aktifkan scoreboard.
+             */
             createScoreboard(player);
 
+            /*
+             * Reset perhitungan speed.
+             */
             lastLocations.remove(id);
             lastTimes.remove(id);
             lastVehicles.remove(id);
 
             player.sendMessage(
-                    "§aSpeed display diaktifkan."
+                    Component.text(
+                            "Speed display diaktifkan.",
+                            NamedTextColor.GREEN
+                    )
             );
 
         } else {
 
+            /*
+             * Matikan scoreboard.
+             */
             removeScoreboard(player);
 
+            /*
+             * Reset data.
+             */
             lastLocations.remove(id);
             lastTimes.remove(id);
             lastVehicles.remove(id);
 
             player.sendMessage(
-                    "§cSpeed display dimatikan."
+                    Component.text(
+                            "Speed display dimatikan.",
+                            NamedTextColor.RED
+                    )
             );
         }
 
