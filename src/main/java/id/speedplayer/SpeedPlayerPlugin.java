@@ -1,16 +1,19 @@
 package id.speedplayer;
 
-import net.kyori.adventure.bossbar.BossBar;
-import net.kyori.adventure.text.Component;
-import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
+import org.bukkit.scoreboard.DisplaySlot;
+import org.bukkit.scoreboard.Objective;
+import org.bukkit.scoreboard.Scoreboard;
+import org.bukkit.scoreboard.ScoreboardManager;
+import org.bukkit.scoreboard.Team;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -21,21 +24,29 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
     private final Map<UUID, Location> lastLocations = new HashMap<>();
     private final Map<UUID, Long> lastTimes = new HashMap<>();
     private final Map<UUID, Boolean> enabled = new HashMap<>();
-    private final Map<UUID, BossBar> bars = new HashMap<>();
+    private final Map<UUID, UUID> lastVehicles = new HashMap<>();
+
+    private final Map<UUID, Scoreboard> scoreboards = new HashMap<>();
 
     private BukkitTask updateTask;
 
     @Override
     public void onEnable() {
+
         saveDefaultConfig();
 
-        boolean showOnJoin = getConfig().getBoolean("show-on-join", true);
+        boolean showOnJoin =
+                getConfig().getBoolean("show-on-join", true);
 
         for (Player player : Bukkit.getOnlinePlayers()) {
-            enabled.put(player.getUniqueId(), showOnJoin);
+
+            enabled.put(
+                    player.getUniqueId(),
+                    showOnJoin
+            );
 
             if (showOnJoin) {
-                createBar(player);
+                createScoreboard(player);
             }
         }
 
@@ -56,25 +67,24 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
 
     @Override
     public void onDisable() {
+
         if (updateTask != null) {
             updateTask.cancel();
         }
 
         for (Player player : Bukkit.getOnlinePlayers()) {
-            BossBar bar = bars.get(player.getUniqueId());
-
-            if (bar != null) {
-                player.hideBossBar(bar);
-            }
+            removeScoreboard(player);
         }
 
-        bars.clear();
+        scoreboards.clear();
         enabled.clear();
         lastLocations.clear();
         lastTimes.clear();
+        lastVehicles.clear();
     }
 
     private void updatePlayers() {
+
         long now = System.nanoTime();
 
         for (Player player : Bukkit.getOnlinePlayers()) {
@@ -83,113 +93,260 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
 
             if (!enabled.getOrDefault(
                     id,
-                    getConfig().getBoolean("show-on-join", true)
+                    getConfig().getBoolean(
+                            "show-on-join",
+                            true
+                    )
             )) {
                 continue;
             }
 
-            if (!bars.containsKey(id)) {
-                createBar(player);
+            if (!scoreboards.containsKey(id)) {
+                createScoreboard(player);
             }
 
-            Location current = player.getLocation();
+            if (getConfig().getBoolean(
+                    "ignore-spectators",
+                    false
+            ) && player.getGameMode() == GameMode.SPECTATOR) {
 
-            Location previous = lastLocations.get(id);
-            Long previousTime = lastTimes.get(id);
+                updateScoreboard(player, 0.0);
+                continue;
+            }
+
+            Entity trackedEntity =
+                    getTrackedEntity(player);
+
+            Location current =
+                    trackedEntity.getLocation();
+
+            UUID currentVehicleId = null;
+
+            if (player.isInsideVehicle()
+                    && player.getVehicle() != null) {
+
+                currentVehicleId =
+                        player.getVehicle().getUniqueId();
+            }
+
+            UUID previousVehicleId =
+                    lastVehicles.get(id);
+
+            boolean vehicleChanged;
+
+            if (currentVehicleId == null) {
+
+                vehicleChanged =
+                        previousVehicleId != null;
+
+            } else {
+
+                vehicleChanged =
+                        !currentVehicleId.equals(
+                                previousVehicleId
+                        );
+            }
 
             double speed = 0.0;
 
-            if (previous != null
+            Location previous =
+                    lastLocations.get(id);
+
+            Long previousTime =
+                    lastTimes.get(id);
+
+            if (!vehicleChanged
+                    && previous != null
                     && previousTime != null
-                    && sameWorld(previous, current)
-                    && !shouldIgnore(player)) {
+                    && sameWorld(previous, current)) {
 
-                double dx = current.getX() - previous.getX();
-                double dy = current.getY() - previous.getY();
-                double dz = current.getZ() - previous.getZ();
+                double dx =
+                        current.getX()
+                                - previous.getX();
 
-                double distance = Math.sqrt(
-                        dx * dx +
-                        dy * dy +
-                        dz * dz
-                );
+                double dy =
+                        current.getY()
+                                - previous.getY();
+
+                double dz =
+                        current.getZ()
+                                - previous.getZ();
+
+                double distance =
+                        Math.sqrt(
+                                dx * dx
+                                        + dy * dy
+                                        + dz * dz
+                        );
 
                 double seconds =
-                        (now - previousTime) / 1_000_000_000.0;
+                        (now - previousTime)
+                                / 1_000_000_000.0;
 
-                if (seconds > 0.0 && seconds < 2.0) {
-                    speed = distance / seconds;
+                if (seconds > 0.0
+                        && seconds < 2.0) {
+
+                    speed =
+                            distance / seconds;
                 }
             }
 
-            lastLocations.put(id, current.clone());
-            lastTimes.put(id, now);
+            lastLocations.put(
+                    id,
+                    current.clone()
+            );
 
-            updateBar(player, speed);
+            lastTimes.put(
+                    id,
+                    now
+            );
+
+            if (currentVehicleId != null) {
+
+                lastVehicles.put(
+                        id,
+                        currentVehicleId
+                );
+
+            } else {
+
+                lastVehicles.remove(id);
+            }
+
+            updateScoreboard(
+                    player,
+                    speed
+            );
         }
     }
 
-    private boolean shouldIgnore(Player player) {
+    private Entity getTrackedEntity(Player player) {
 
-        if (getConfig().getBoolean("ignore-vehicles", true)
-                && player.isInsideVehicle()) {
-            return true;
+        if (player.isInsideVehicle()
+                && player.getVehicle() != null) {
+
+            return player.getVehicle();
         }
 
-        return getConfig().getBoolean("ignore-spectators", false)
-                && player.getGameMode() == GameMode.SPECTATOR;
+        return player;
     }
 
-    private boolean sameWorld(Location first, Location second) {
+    private boolean sameWorld(
+            Location first,
+            Location second
+    ) {
+
         return first.getWorld() != null
-                && first.getWorld().equals(second.getWorld());
+                && second.getWorld() != null
+                && first.getWorld().equals(
+                        second.getWorld()
+                );
     }
 
-    private void createBar(Player player) {
+    private void createScoreboard(Player player) {
 
-        UUID id = player.getUniqueId();
+        UUID id =
+                player.getUniqueId();
 
-        BossBar oldBar = bars.get(id);
+        removeScoreboard(player);
 
-        if (oldBar != null) {
-            player.hideBossBar(oldBar);
-        }
+        ScoreboardManager manager =
+                Bukkit.getScoreboardManager();
 
-        BossBar bar = BossBar.bossBar(
-                Component.text(
-                        "⚡ SPEED: 0.00 blocks/s",
-                        NamedTextColor.GREEN
-                ),
-                0.0f,
-                BossBar.Color.GREEN,
-                BossBar.Overlay.PROGRESS
-        );
-
-        player.showBossBar(bar);
-
-        bars.put(id, bar);
-    }
-
-    private void updateBar(Player player, double speed) {
-
-        BossBar bar = bars.get(player.getUniqueId());
-
-        if (bar == null) {
+        if (manager == null) {
             return;
         }
 
-        double maxDisplay = Math.max(
-                0.1,
-                getConfig().getDouble(
-                        "max-display-speed",
-                        10.0
-                )
+        Scoreboard scoreboard =
+                manager.getNewScoreboard();
+
+        Objective objective =
+                scoreboard.registerNewObjective(
+                        "speedplayer",
+                        "dummy",
+                        "⚡ SPEED"
+                );
+
+        objective.setDisplaySlot(
+                DisplaySlot.SIDEBAR
         );
 
-        float progress = (float) Math.min(
-                1.0,
-                speed / maxDisplay
+        /*
+         * Baris kosong digunakan sebagai
+         * spacer agar tampilan lebih rapi.
+         */
+        Team speedTeam =
+                scoreboard.registerNewTeam(
+                        "speed"
+                );
+
+        speedTeam.addEntry(
+                "speed_value"
         );
+
+        objective.getScore(
+                "speed_value"
+        ).setScore(2);
+
+        Team vehicleTeam =
+                scoreboard.registerNewTeam(
+                        "vehicle"
+                );
+
+        vehicleTeam.addEntry(
+                "vehicle_value"
+        );
+
+        objective.getScore(
+                "vehicle_value"
+        ).setScore(1);
+
+        /*
+         * Simpan scoreboard.
+         */
+        scoreboards.put(
+                id,
+                scoreboard
+        );
+
+        player.setScoreboard(
+                scoreboard
+        );
+
+        updateScoreboard(
+                player,
+                0.0
+        );
+    }
+
+    private void updateScoreboard(
+            Player player,
+            double speed
+    ) {
+
+        Scoreboard scoreboard =
+                scoreboards.get(
+                        player.getUniqueId()
+                );
+
+        if (scoreboard == null) {
+            return;
+        }
+
+        Team speedTeam =
+                scoreboard.getTeam(
+                        "speed"
+                );
+
+        Team vehicleTeam =
+                scoreboard.getTeam(
+                        "vehicle"
+                );
+
+        if (speedTeam == null
+                || vehicleTeam == null) {
+            return;
+        }
 
         double fastThreshold =
                 getConfig().getDouble(
@@ -203,37 +360,119 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                         10.0
                 );
 
-        BossBar.Color color;
-        NamedTextColor textColor;
+        String prefix;
 
         if (speed >= veryFastThreshold) {
 
-            color = BossBar.Color.RED;
-            textColor = NamedTextColor.RED;
+            prefix = "§c⚡ ";
 
         } else if (speed >= fastThreshold) {
 
-            color = BossBar.Color.YELLOW;
-            textColor = NamedTextColor.YELLOW;
+            prefix = "§e⚡ ";
 
         } else {
 
-            color = BossBar.Color.GREEN;
-            textColor = NamedTextColor.GREEN;
+            prefix = "§a⚡ ";
         }
 
-        bar.name(
-                Component.text(
-                        String.format(
-                                "⚡ SPEED: %.2f blocks/s",
+        /*
+         * Tampilkan speed.
+         */
+        speedTeam.prefix(
+                prefix
+                        + String.format(
+                                "%.2f",
                                 speed
-                        ),
-                        textColor
-                )
+                        )
+                        + " §7blocks/s"
         );
 
-        bar.progress(progress);
-        bar.color(color);
+        /*
+         * Tampilkan jenis kendaraan.
+         */
+        if (player.isInsideVehicle()
+                && player.getVehicle() != null) {
+
+            String vehicleName =
+                    getVehicleName(
+                            player.getVehicle()
+                    );
+
+            vehicleTeam.prefix(
+                    "§7" + vehicleName
+            );
+
+        } else {
+
+            vehicleTeam.prefix(
+                    "§7Walking"
+            );
+        }
+    }
+
+    private String getVehicleName(
+            Entity entity
+    ) {
+
+        String name =
+                entity.getType()
+                        .name()
+                        .toLowerCase()
+                        .replace(
+                                "_",
+                                " "
+                        );
+
+        StringBuilder result =
+                new StringBuilder();
+
+        for (String word :
+                name.split(" ")) {
+
+            if (word.isEmpty()) {
+                continue;
+            }
+
+            result.append(
+                    Character.toUpperCase(
+                            word.charAt(0)
+                    )
+            );
+
+            if (word.length() > 1) {
+                result.append(
+                        word.substring(1)
+                );
+            }
+
+            result.append(" ");
+        }
+
+        return result.toString().trim();
+    }
+
+    private void removeScoreboard(
+            Player player
+    ) {
+
+        UUID id =
+                player.getUniqueId();
+
+        Scoreboard scoreboard =
+                scoreboards.remove(id);
+
+        if (scoreboard != null) {
+
+            ScoreboardManager manager =
+                    Bukkit.getScoreboardManager();
+
+            if (manager != null) {
+
+                player.setScoreboard(
+                        manager.getMainScoreboard()
+                );
+            }
+        }
     }
 
     @Override
@@ -245,78 +484,78 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
     ) {
 
         if (!(sender instanceof Player player)) {
+
             sender.sendMessage(
                     "Only players can use this command."
             );
+
             return true;
         }
 
-        UUID id = player.getUniqueId();
+        UUID id =
+                player.getUniqueId();
 
-        boolean current = enabled.getOrDefault(
-                id,
-                getConfig().getBoolean(
-                        "show-on-join",
-                        true
-                )
-        );
+        boolean current =
+                enabled.getOrDefault(
+                        id,
+                        getConfig().getBoolean(
+                                "show-on-join",
+                                true
+                        )
+                );
 
         if (args.length == 0) {
 
             current = !current;
 
-        } else if (args[0].equalsIgnoreCase("on")) {
+        } else if (
+                args[0].equalsIgnoreCase("on")
+        ) {
 
             current = true;
 
-        } else if (args[0].equalsIgnoreCase("off")) {
+        } else if (
+                args[0].equalsIgnoreCase("off")
+        ) {
 
             current = false;
 
         } else {
 
             player.sendMessage(
-                    Component.text(
-                            "Gunakan: /speed [on|off]",
-                            NamedTextColor.YELLOW
-                    )
+                    "§eGunakan: /speed [on|off]"
             );
 
             return true;
         }
 
-        enabled.put(id, current);
+        enabled.put(
+                id,
+                current
+        );
 
         if (current) {
 
-            createBar(player);
+            createScoreboard(player);
 
             lastLocations.remove(id);
             lastTimes.remove(id);
+            lastVehicles.remove(id);
 
             player.sendMessage(
-                    Component.text(
-                            "Speed display diaktifkan.",
-                            NamedTextColor.GREEN
-                    )
+                    "§aSpeed display diaktifkan."
             );
 
         } else {
 
-            BossBar bar = bars.remove(id);
-
-            if (bar != null) {
-                player.hideBossBar(bar);
-            }
+            removeScoreboard(player);
 
             lastLocations.remove(id);
             lastTimes.remove(id);
+            lastVehicles.remove(id);
 
             player.sendMessage(
-                    Component.text(
-                            "Speed display dimatikan.",
-                            NamedTextColor.RED
-                    )
+                    "§cSpeed display dimatikan."
             );
         }
 
