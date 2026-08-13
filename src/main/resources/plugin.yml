@@ -1,0 +1,17 @@
+name: SpeedPlayer
+version: '1.0.0'
+main: id.speedplayer.SpeedPlayerPlugin
+api-version: '26.2'
+description: Real-time player speed display using a BossBar.
+author: Chandra
+
+commands:
+  speed:
+    description: Toggle the player speed display.
+    usage: /speed [on|off]
+    permission: speedplayer.use
+
+permissions:
+  speedplayer.use:
+    description: Allows the player to use /speed.
+    default: true
