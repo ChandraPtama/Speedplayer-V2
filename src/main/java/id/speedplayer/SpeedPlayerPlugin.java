@@ -1,7 +1,9 @@
 package id.speedplayer;
 
+import io.papermc.paper.scoreboard.numbers.NumberFormat;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
+
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
@@ -11,11 +13,12 @@ import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitTask;
+
 import org.bukkit.scoreboard.DisplaySlot;
 import org.bukkit.scoreboard.Objective;
+import org.bukkit.scoreboard.Score;
 import org.bukkit.scoreboard.Scoreboard;
 import org.bukkit.scoreboard.ScoreboardManager;
-import org.bukkit.scoreboard.Team;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -23,22 +26,42 @@ import java.util.UUID;
 
 public final class SpeedPlayerPlugin extends JavaPlugin {
 
-    private final Map<UUID, Location> lastLocations = new HashMap<>();
-    private final Map<UUID, Long> lastTimes = new HashMap<>();
-    private final Map<UUID, Boolean> enabled = new HashMap<>();
+    /*
+     * Posisi terakhir player / kendaraan.
+     */
+    private final Map<UUID, Location> lastLocations =
+            new HashMap<>();
 
     /*
-     * Menyimpan kendaraan/mob yang sedang dinaiki.
-     * Digunakan untuk mendeteksi saat player naik/turun kendaraan.
+     * Waktu terakhir update.
      */
-    private final Map<UUID, UUID> lastVehicles = new HashMap<>();
+    private final Map<UUID, Long> lastTimes =
+            new HashMap<>();
+
+    /*
+     * Status speed display.
+     */
+    private final Map<UUID, Boolean> enabled =
+            new HashMap<>();
+
+    /*
+     * Kendaraan/mob terakhir yang dinaiki.
+     */
+    private final Map<UUID, UUID> lastVehicles =
+            new HashMap<>();
 
     /*
      * Scoreboard masing-masing player.
      */
-    private final Map<UUID, Scoreboard> scoreboards = new HashMap<>();
+    private final Map<UUID, Scoreboard> scoreboards =
+            new HashMap<>();
 
     private BukkitTask updateTask;
+
+
+    // =========================================================
+    // ENABLE
+    // =========================================================
 
     @Override
     public void onEnable() {
@@ -52,10 +75,11 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                 );
 
         /*
-         * Buat scoreboard untuk player yang
-         * sudah online ketika plugin di-reload.
+         * Buat scoreboard untuk player
+         * yang sudah online ketika plugin reload.
          */
-        for (Player player : Bukkit.getOnlinePlayers()) {
+        for (Player player :
+                Bukkit.getOnlinePlayers()) {
 
             enabled.put(
                     player.getUniqueId(),
@@ -68,18 +92,19 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
         }
 
         /*
-         * Interval update speed.
+         * Interval update.
          *
          * Default:
          * 2 ticks = 0.1 detik
          */
-        long interval = Math.max(
-                1L,
-                getConfig().getLong(
-                        "update-ticks",
-                        2L
-                )
-        );
+        long interval =
+                Math.max(
+                        1L,
+                        getConfig().getLong(
+                                "update-ticks",
+                                2L
+                        )
+                );
 
         updateTask =
                 Bukkit.getScheduler().runTaskTimer(
@@ -94,6 +119,11 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
         );
     }
 
+
+    // =========================================================
+    // DISABLE
+    // =========================================================
+
     @Override
     public void onDisable() {
 
@@ -102,7 +132,8 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
         }
 
         /*
-         * Kembalikan scoreboard player ke scoreboard utama.
+         * Kembalikan scoreboard semua player
+         * ke scoreboard utama.
          */
         for (Player player :
                 Bukkit.getOnlinePlayers()) {
@@ -117,12 +148,15 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
         lastVehicles.clear();
     }
 
-    /**
-     * Update speed semua player.
-     */
+
+    // =========================================================
+    // UPDATE PLAYER
+    // =========================================================
+
     private void updatePlayers() {
 
-        long now = System.nanoTime();
+        long now =
+                System.nanoTime();
 
         for (Player player :
                 Bukkit.getOnlinePlayers()) {
@@ -131,7 +165,7 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                     player.getUniqueId();
 
             /*
-             * Apakah speed display aktif?
+             * Cek apakah display aktif.
              */
             if (!enabled.getOrDefault(
                     id,
@@ -147,13 +181,14 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
              * Pastikan scoreboard tersedia.
              */
             if (!scoreboards.containsKey(id)) {
-
                 createScoreboard(player);
             }
 
-            /*
-             * Spectator.
-             */
+
+            // -------------------------------------------------
+            // SPECTATOR
+            // -------------------------------------------------
+
             if (getConfig().getBoolean(
                     "ignore-spectators",
                     false
@@ -169,36 +204,24 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                 continue;
             }
 
-            /*
-             * Entity yang dihitung.
-             *
-             * Jalan kaki:
-             * Player
-             *
-             * Naik Horse:
-             * Horse
-             *
-             * Naik Pig:
-             * Pig
-             *
-             * Naik Camel:
-             * Camel
-             *
-             * Naik Boat:
-             * Boat
-             *
-             * dll.
-             */
+
+            // -------------------------------------------------
+            // ENTITY YANG DIHITUNG
+            // -------------------------------------------------
+
             Entity trackedEntity =
                     getTrackedEntity(player);
 
             Location current =
                     trackedEntity.getLocation();
 
-            /*
-             * ID kendaraan yang sedang dinaiki.
-             */
-            UUID currentVehicleId = null;
+
+            // -------------------------------------------------
+            // CEK VEHICLE
+            // -------------------------------------------------
+
+            UUID currentVehicleId =
+                    null;
 
             if (player.isInsideVehicle()
                     && player.getVehicle() != null) {
@@ -211,15 +234,6 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
             UUID previousVehicleId =
                     lastVehicles.get(id);
 
-            /*
-             * Deteksi perubahan kendaraan.
-             *
-             * Contoh:
-             *
-             * Player -> Horse
-             *
-             * Horse -> Player
-             */
             boolean vehicleChanged;
 
             if (currentVehicleId == null) {
@@ -235,6 +249,11 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                         );
             }
 
+
+            // -------------------------------------------------
+            // HITUNG SPEED
+            // -------------------------------------------------
+
             double speed = 0.0;
 
             Location previous =
@@ -243,14 +262,7 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
             Long previousTime =
                     lastTimes.get(id);
 
-            /*
-             * Hitung speed hanya jika:
-             *
-             * - bukan baru naik/turun kendaraan
-             * - lokasi sebelumnya tersedia
-             * - waktu sebelumnya tersedia
-             * - masih berada di world yang sama
-             */
+
             if (!vehicleChanged
                     && previous != null
                     && previousTime != null
@@ -272,7 +284,7 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                                 - previous.getZ();
 
                 /*
-                 * Jarak perpindahan dalam blocks.
+                 * Jarak perpindahan.
                  */
                 double distance =
                         Math.sqrt(
@@ -292,8 +304,7 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                                 / 1_000_000_000.0;
 
                 /*
-                 * Hindari pembagian dengan nol
-                 * dan waktu yang terlalu lama.
+                 * Hitung blocks per second.
                  */
                 if (seconds > 0.0
                         && seconds < 2.0) {
@@ -303,25 +314,22 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                 }
             }
 
-            /*
-             * Simpan posisi terbaru.
-             */
+
+            // -------------------------------------------------
+            // SIMPAN DATA
+            // -------------------------------------------------
+
             lastLocations.put(
                     id,
                     current.clone()
             );
 
-            /*
-             * Simpan waktu terbaru.
-             */
             lastTimes.put(
                     id,
                     now
             );
 
-            /*
-             * Simpan kendaraan terbaru.
-             */
+
             if (currentVehicleId != null) {
 
                 lastVehicles.put(
@@ -334,9 +342,11 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                 lastVehicles.remove(id);
             }
 
-            /*
-             * Update tampilan scoreboard.
-             */
+
+            // -------------------------------------------------
+            // UPDATE SIDEBAR
+            // -------------------------------------------------
+
             updateScoreboard(
                     player,
                     speed
@@ -344,17 +354,25 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
         }
     }
 
-    /**
-     * Menentukan entity yang digunakan untuk
-     * menghitung speed.
-     */
+
+    // =========================================================
+    // TRACK ENTITY
+    // =========================================================
+
     private Entity getTrackedEntity(
             Player player
     ) {
 
         /*
-         * Jika sedang menaiki sesuatu,
-         * hitung pergerakan kendaraan/mob.
+         * Jika player sedang menaiki entity,
+         * gunakan entity tersebut.
+         *
+         * Contoh:
+         *
+         * Player -> Horse
+         * Player -> Pig
+         * Player -> Camel
+         * Player -> Boat
          */
         if (player.isInsideVehicle()
                 && player.getVehicle() != null) {
@@ -363,16 +381,17 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
         }
 
         /*
-         * Jika berjalan kaki,
-         * hitung pergerakan player.
+         * Jika tidak menaiki apa-apa,
+         * gunakan player.
          */
         return player;
     }
 
-    /**
-     * Mengecek apakah dua lokasi berada
-     * di world yang sama.
-     */
+
+    // =========================================================
+    // SAME WORLD
+    // =========================================================
+
     private boolean sameWorld(
             Location first,
             Location second
@@ -385,9 +404,11 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                 );
     }
 
-    /**
-     * Membuat scoreboard sidebar.
-     */
+
+    // =========================================================
+    // CREATE SCOREBOARD
+    // =========================================================
+
     private void createScoreboard(
             Player player
     ) {
@@ -395,10 +416,12 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
         UUID id =
                 player.getUniqueId();
 
+
         /*
-         * Hapus scoreboard lama jika ada.
+         * Hapus scoreboard lama.
          */
         removeScoreboard(player);
+
 
         ScoreboardManager manager =
                 Bukkit.getScoreboardManager();
@@ -407,15 +430,18 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
             return;
         }
 
+
         /*
          * Buat scoreboard baru.
          */
         Scoreboard scoreboard =
                 manager.getNewScoreboard();
 
-        /*
-         * Objective.
-         */
+
+        // -----------------------------------------------------
+        // OBJECTIVE
+        // -----------------------------------------------------
+
         Objective objective =
                 scoreboard.registerNewObjective(
                         "speedplayer",
@@ -426,59 +452,69 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                         )
                 );
 
+
         /*
-         * Tampilkan di sisi kanan layar.
+         * Sidebar kanan.
          */
         objective.setDisplaySlot(
                 DisplaySlot.SIDEBAR
         );
 
-        /*
-         * Team untuk nilai speed.
-         */
-        Team speedTeam =
-                scoreboard.registerNewTeam(
-                        "speed"
-                );
 
-        speedTeam.addEntry(
-                "speed_value"
+        /*
+         * HILANGKAN ANGKA SCORE
+         *
+         * Tanpa ini akan muncul:
+         *
+         * Speed       2
+         * Vehicle     1
+         */
+        objective.numberFormat(
+                NumberFormat.blank()
         );
 
-        objective.getScore(
-                "speed_value"
-        ).setScore(2);
 
-        /*
-         * Team untuk status kendaraan.
-         */
-        Team vehicleTeam =
-                scoreboard.registerNewTeam(
-                        "vehicle"
+        // -----------------------------------------------------
+        // SPEED SCORE
+        // -----------------------------------------------------
+
+        Score speedScore =
+                objective.getScore(
+                        "speed_value"
                 );
 
-        vehicleTeam.addEntry(
-                "vehicle_value"
-        );
+        speedScore.setScore(2);
 
-        objective.getScore(
-                "vehicle_value"
-        ).setScore(1);
 
-        /*
-         * Simpan scoreboard.
-         */
+        // -----------------------------------------------------
+        // VEHICLE SCORE
+        // -----------------------------------------------------
+
+        Score vehicleScore =
+                objective.getScore(
+                        "vehicle_value"
+                );
+
+        vehicleScore.setScore(1);
+
+
+        // -----------------------------------------------------
+        // SIMPAN
+        // -----------------------------------------------------
+
         scoreboards.put(
                 id,
                 scoreboard
         );
 
+
         /*
-         * Pasang scoreboard ke player.
+         * Pasang scoreboard.
          */
         player.setScoreboard(
                 scoreboard
         );
+
 
         /*
          * Tampilkan nilai awal.
@@ -489,9 +525,11 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
         );
     }
 
-    /**
-     * Update teks sidebar.
-     */
+
+    // =========================================================
+    // UPDATE SCOREBOARD
+    // =========================================================
+
     private void updateScoreboard(
             Player player,
             double speed
@@ -506,25 +544,21 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
             return;
         }
 
-        Team speedTeam =
-                scoreboard.getTeam(
-                        "speed"
+
+        Objective objective =
+                scoreboard.getObjective(
+                        "speedplayer"
                 );
 
-        Team vehicleTeam =
-                scoreboard.getTeam(
-                        "vehicle"
-                );
-
-        if (speedTeam == null
-                || vehicleTeam == null) {
-
+        if (objective == null) {
             return;
         }
 
-        /*
-         * Threshold warna.
-         */
+
+        // -----------------------------------------------------
+        // THRESHOLD
+        // -----------------------------------------------------
+
         double fastThreshold =
                 getConfig().getDouble(
                         "fast-threshold",
@@ -537,26 +571,36 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                         10.0
                 );
 
+
         NamedTextColor speedColor;
 
+
         /*
-         * Merah = sangat cepat
+         * MERAH
+         *
+         * Sangat cepat.
          */
         if (speed >= veryFastThreshold) {
 
             speedColor =
                     NamedTextColor.RED;
 
+
         /*
-         * Kuning = cepat
+         * KUNING
+         *
+         * Cepat.
          */
         } else if (speed >= fastThreshold) {
 
             speedColor =
                     NamedTextColor.YELLOW;
 
+
         /*
-         * Hijau = normal
+         * HIJAU
+         *
+         * Normal.
          */
         } else {
 
@@ -564,13 +608,18 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                     NamedTextColor.GREEN;
         }
 
-        /*
-         * Tampilkan speed.
-         *
-         * Paper 26.2 menggunakan Component
-         * untuk prefix Team.
-         */
-        speedTeam.prefix(
+
+        // -----------------------------------------------------
+        // SPEED TEXT
+        // -----------------------------------------------------
+
+        Score speedScore =
+                objective.getScore(
+                        "speed_value"
+                );
+
+
+        speedScore.customName(
                 Component.text(
                         String.format(
                                 "⚡ %.2f blocks/s",
@@ -580,9 +629,17 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                 )
         );
 
-        /*
-         * Tampilkan kendaraan.
-         */
+
+        // -----------------------------------------------------
+        // VEHICLE TEXT
+        // -----------------------------------------------------
+
+        Score vehicleScore =
+                objective.getScore(
+                        "vehicle_value"
+                );
+
+
         if (player.isInsideVehicle()
                 && player.getVehicle() != null) {
 
@@ -591,16 +648,18 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                             player.getVehicle()
                     );
 
-            vehicleTeam.prefix(
+
+            vehicleScore.customName(
                     Component.text(
                             vehicleName,
                             NamedTextColor.GRAY
                     )
             );
 
+
         } else {
 
-            vehicleTeam.prefix(
+            vehicleScore.customName(
                     Component.text(
                             "Walking",
                             NamedTextColor.GRAY
@@ -609,20 +668,11 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
         }
     }
 
-    /**
-     * Mengubah nama EntityType menjadi
-     * nama yang lebih rapi.
-     *
-     * Contoh:
-     *
-     * DARK_OAK_BOAT
-     * ->
-     * Dark Oak Boat
-     *
-     * CAMEL
-     * ->
-     * Camel
-     */
+
+    // =========================================================
+    // ENTITY NAME
+    // =========================================================
+
     private String getVehicleName(
             Entity entity
     ) {
@@ -636,8 +686,10 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                                 " "
                         );
 
+
         StringBuilder result =
                 new StringBuilder();
+
 
         for (String word :
                 name.split(" ")) {
@@ -646,12 +698,20 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                 continue;
             }
 
+
+            /*
+             * Huruf pertama kapital.
+             */
             result.append(
                     Character.toUpperCase(
                             word.charAt(0)
                     )
             );
 
+
+            /*
+             * Sisanya tetap lowercase.
+             */
             if (word.length() > 1) {
 
                 result.append(
@@ -659,17 +719,21 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                 );
             }
 
+
             result.append(" ");
         }
+
 
         return result
                 .toString()
                 .trim();
     }
 
-    /**
-     * Menghapus scoreboard dari player.
-     */
+
+    // =========================================================
+    // REMOVE SCOREBOARD
+    // =========================================================
+
     private void removeScoreboard(
             Player player
     ) {
@@ -677,16 +741,22 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
         UUID id =
                 player.getUniqueId();
 
+
         Scoreboard scoreboard =
                 scoreboards.remove(id);
+
 
         if (scoreboard != null) {
 
             ScoreboardManager manager =
                     Bukkit.getScoreboardManager();
 
+
             if (manager != null) {
 
+                /*
+                 * Kembalikan scoreboard normal.
+                 */
                 player.setScoreboard(
                         manager.getMainScoreboard()
                 );
@@ -694,13 +764,11 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
         }
     }
 
-    /**
-     * Command:
-     *
-     * /speed
-     * /speed on
-     * /speed off
-     */
+
+    // =========================================================
+    // COMMAND
+    // =========================================================
+
     @Override
     public boolean onCommand(
             CommandSender sender,
@@ -710,7 +778,7 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
     ) {
 
         /*
-         * Command hanya bisa digunakan player.
+         * Hanya player.
          */
         if (!(sender instanceof Player player)) {
 
@@ -721,8 +789,10 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
             return true;
         }
 
+
         UUID id =
                 player.getUniqueId();
+
 
         boolean current =
                 enabled.getOrDefault(
@@ -733,18 +803,20 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                         )
                 );
 
-        /*
-         * /speed
-         *
-         * Toggle.
-         */
+
+        // -----------------------------------------------------
+        // /speed
+        // -----------------------------------------------------
+
         if (args.length == 0) {
 
             current = !current;
 
-        /*
-         * /speed on
-         */
+
+        // -----------------------------------------------------
+        // /speed on
+        // -----------------------------------------------------
+
         } else if (
                 args[0].equalsIgnoreCase(
                         "on"
@@ -753,9 +825,11 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
 
             current = true;
 
-        /*
-         * /speed off
-         */
+
+        // -----------------------------------------------------
+        // /speed off
+        // -----------------------------------------------------
+
         } else if (
                 args[0].equalsIgnoreCase(
                         "off"
@@ -763,6 +837,11 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
         ) {
 
             current = false;
+
+
+        // -----------------------------------------------------
+        // INVALID
+        // -----------------------------------------------------
 
         } else {
 
@@ -776,6 +855,7 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
             return true;
         }
 
+
         /*
          * Simpan status.
          */
@@ -784,19 +864,23 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                 current
         );
 
+
+        // -----------------------------------------------------
+        // ON
+        // -----------------------------------------------------
+
         if (current) {
 
-            /*
-             * Aktifkan scoreboard.
-             */
             createScoreboard(player);
 
+
             /*
-             * Reset perhitungan speed.
+             * Reset perhitungan.
              */
             lastLocations.remove(id);
             lastTimes.remove(id);
             lastVehicles.remove(id);
+
 
             player.sendMessage(
                     Component.text(
@@ -805,12 +889,15 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                     )
             );
 
+
+        // -----------------------------------------------------
+        // OFF
+        // -----------------------------------------------------
+
         } else {
 
-            /*
-             * Matikan scoreboard.
-             */
             removeScoreboard(player);
+
 
             /*
              * Reset data.
@@ -819,6 +906,7 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
             lastTimes.remove(id);
             lastVehicles.remove(id);
 
+
             player.sendMessage(
                     Component.text(
                             "Speed display dimatikan.",
@@ -826,6 +914,7 @@ public final class SpeedPlayerPlugin extends JavaPlugin {
                     )
             );
         }
+
 
         return true;
     }
